@@ -5,12 +5,13 @@
 #include <chrono>
 #include <thread>
 #include <future>  
+#include <bitset>
 #include "qpl/qpl.h"
 
 #include "utils.hpp"
 
-constexpr const uint32_t value_to_find       = 48;
-constexpr const uint32_t byte_bit_length     = 8;
+constexpr const uint32_t VALUE_TO_FIND       = 48;
+constexpr const uint32_t BIT_WIDTH           = 8;
 
 void print_source_size(uint32_t size) {
     if (size >= (1024 * 1024 * 1024)) {
@@ -39,21 +40,42 @@ qpl_status benchmark_scan(qpl_path_t execution_path, uint8_t* source_array, char
         std::cerr << "Error " << status << " while init job.\n";
         return status;
     }
+
+    std::vector<uint8_t> dest_temp((size + 7) / 8);
     job->next_in_ptr        = source_array;
     job->available_in       = size;
-    job->next_out_ptr       = reinterpret_cast<uint8_t*>(destination_array);
-    job->available_out      = size;
+    job->next_out_ptr       = dest_temp.data();
+    job->available_out      = static_cast<uint32_t>(dest_temp.size());
     job->op                 = qpl_op_scan_eq;
-    job->src1_bit_width     = 8;
+    job->src1_bit_width     = BIT_WIDTH;
     job->num_input_elements = size;
-    job->out_bit_width      = qpl_ow_8;
-    job->param_low          = value_to_find;
-    job->flags = QPL_FLAG_OMIT_CHECKSUMS | QPL_FLAG_OMIT_AGGREGATES;
+    job->out_bit_width      = qpl_ow_nom;
+    job->param_low          = VALUE_TO_FIND;
+    job->flags = QPL_FLAG_OUT_BE | QPL_FLAG_OMIT_CHECKSUMS | QPL_FLAG_OMIT_AGGREGATES;
 
     status = qpl_execute_job(job);
     if (status != QPL_STS_OK) {
         std::cerr << "Error " << status << " while scan job.\n";
     }
+    // convert the mask output into char[]
+    size_t remainder = size & (BIT_WIDTH - 1);
+    size_t full_bytes = size / BIT_WIDTH;
+    size_t output_offset = 0;
+    for (size_t i = 0; i < full_bytes; ++i) {
+        uint8_t num = static_cast<uint8_t>(dest_temp[i]);
+        for (size_t bit = 0; bit < BIT_WIDTH; ++bit) {
+            destination_array[output_offset++] =
+                (num & (1u << (BIT_WIDTH - 1 - bit))) ? '1' : '0';
+        }
+    }
+    if (remainder != 0) {
+        uint8_t num = static_cast<uint8_t>(dest_temp[full_bytes]);
+        for (size_t bit = 0; bit < remainder; ++bit) {
+            destination_array[output_offset++] =
+                (num & (1u << (BIT_WIDTH - 1 - bit))) ? '1' : '0';
+        }
+    }
+    
     qpl_status fini_status = qpl_fini_job(job);
     if (status == QPL_STS_OK && fini_status != QPL_STS_OK) {
         status = fini_status;
@@ -65,7 +87,7 @@ void benchmark_multithreaded(qpl_path_t execution_path, uint32_t source_size, in
 {
     std::vector<uint8_t> source_array(source_size);
     std::iota(source_array.begin(), source_array.end(), 0);
-    source_array.back() = value_to_find;
+    source_array.back() = VALUE_TO_FIND;
     std::unique_ptr<char[]> destination_array(new char[source_size]{});
     std::vector<std::future<qpl_status>> futures;
     futures.reserve(num_threads);
@@ -116,14 +138,14 @@ void benchmark_multithreaded(qpl_path_t execution_path, uint32_t source_size, in
 ///////////////////////////////******************//////////////////////////////////////////
 void linearSearch(const uint8_t* source_array, char* destination_array, uint32_t size)
 {
-    for (uint32_t i = 0; i < size; ++i) destination_array[i] = (source_array[i] == value_to_find) ? '1' : '0';
+    for (uint32_t i = 0; i < size; ++i) destination_array[i] = (source_array[i] == VALUE_TO_FIND) ? '1' : '0';
 }
 
 void cpu_multithreaded(uint32_t source_size, int num_threads)
 {
     std::vector<uint8_t> source_array(source_size);
     std::iota(source_array.begin(), source_array.end(), 0);
-    source_array.back() = value_to_find;
+    source_array.back() = VALUE_TO_FIND;
     std::unique_ptr<char[]> destination_array(new char[source_size]{});
     std::vector<std::future<void>> futures;
     futures.reserve(num_threads);
