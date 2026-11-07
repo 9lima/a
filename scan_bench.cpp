@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <future>  
-#include <bitset>
 #include "qpl/qpl.h"
 
 #include "utils.hpp"
