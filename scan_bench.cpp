@@ -1,3 +1,6 @@
+#include <cstdio>
+#include <cstdlib>
+#include <unistd.h>
 #include <iostream>
 #include <memory>
 #include <numeric>
@@ -7,12 +10,14 @@
 #include <algorithm>
 #include <cstdint>
 #include <future>  
+#include <bitset>
 #include "qpl/qpl.h"
 
-#include "utils.hpp"
 
 constexpr const uint32_t VALUE_TO_FIND       = 48;
 constexpr const uint32_t BIT_WIDTH           = 8;
+
+int parse_execution_path(int argc, char** argv, qpl_path_t* path_ptr);
 
 void print_source_size(uint32_t size) {
     if (size >= (1024 * 1024 * 1024)) {
@@ -190,15 +195,13 @@ std::unique_ptr<char[]> cpu_multithreaded(uint32_t source_size, int num_threads)
 
 int main(int argc, char** argv) {
     std::cout << "Intel(R) Query Processing Library version is " << qpl_get_library_version() << ".\n";
-    qpl_path_t execution_path = qpl_path_hardware;
-    if (parse_execution_path(argc, argv, &execution_path, 0) != 0) {
-        return 1;
-    }
+    qpl_path_t execution_path;
+    if (parse_execution_path(argc, argv, &execution_path) != 0) return -1;
 
-    // std::vector<uint32_t> source_sizes = {128 * 1024 * 1024};
-    std::vector<uint32_t> source_sizes = {128 * 1024 * 1024, 256 * 1024 * 1024, 512 * 1024 * 1024, 1 * 1024 * 1024 * 1024};
-    // std::vector<int> thread = {1, 2};
-    std::vector<int> thread = {1, 2, 4, 8, 16, 32, 64, 96};
+    std::vector<uint32_t> source_sizes = {128 * 1024 * 1024};
+    // std::vector<uint32_t> source_sizes = {128 * 1024 * 1024, 256 * 1024 * 1024, 512 * 1024 * 1024, 1 * 1024 * 1024 * 1024};
+    std::vector<int> thread = {1, 2};
+    // std::vector<int> thread = {1, 2, 4, 8, 16, 32, 64, 96};
     
     for (uint32_t size : source_sizes) {
         for (auto num_threads: thread) {
@@ -206,11 +209,41 @@ int main(int argc, char** argv) {
             std::unique_ptr<char[]> qpl_result = benchmark_multithreaded(execution_path, size, num_threads);
             if (!cpu_result || !qpl_result) {
                 std::cerr << "Benchmark failed.\n";
-                return 1;
+                return -1;
             }
             bool same = std::equal( cpu_result.get(), cpu_result.get() + size, qpl_result.get() );            
             std::cout << "Results identical: " << std::boolalpha << same << '\n';
         }
     }
     return 0;
+}
+
+
+
+int parse_execution_path(int argc, char** argv, qpl_path_t* path_ptr) {
+
+    if (argc < 2) {
+        printf("Usage: %s [-H (hardware)] [-S (software)] [-A (auto)]\n", argv[0]);
+        return -1;
+    }
+
+    int opt = 0;
+    while ((opt = getopt(argc, argv, "HSA")) != -1) {
+        switch (opt) {
+            case 'H':
+                *path_ptr = qpl_path_hardware;
+                break;
+            case 'S':
+                *path_ptr = qpl_path_software;
+                break;
+            case 'A':
+                *path_ptr = qpl_path_auto;
+                break;
+            default:
+                printf("Usage: %s [-H (hardware_path)] [-S (software_path)] [-A (auto)]\n", argv[0]);
+                return -1;
+        }
+    }
+
+    return 0; // Success
 }
